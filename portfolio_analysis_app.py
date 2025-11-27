@@ -35,49 +35,72 @@ st.title("🚀 Portfolio Optimization & Analysis")
 
 # Load data function
 @st.cache_data
+@st.cache_data
+@st.cache_data
 def load_and_preprocess_data(file_path):
     """
     Load and preprocess data from Excel or CSV file
     """
     try:
         # Read file
-        if file_path.endswith('.xlsx'):
+        if file_path.endswith(".xlsx"):
             df = pd.read_excel(file_path)
-        elif file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
+        elif file_path.endswith(".csv"):
+            # For CSV, try different date parsing strategies
+            try:
+                # Try parsing with US format first (m/d/Y)
+                df = pd.read_csv(file_path, parse_dates=["Date"], dayfirst=False)
+            except:
+                try:
+                    # Try parsing with European format (d/m/Y)
+                    df = pd.read_csv(file_path, parse_dates=["Date"], dayfirst=True)
+                except:
+                    # Fallback to reading without date parsing
+                    df = pd.read_csv(file_path)
+                    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         else:
             raise ValueError("Unsupported file type")
         
-        # Find date and price columns
-        date_cols = ['Date', 'date', 'Séance', 'Trading Date']
-        price_cols = ['Close', 'Price', 'Cours', 'Cours ajusté', 'Adjusted Close']
+        # Debugging information
+        st.write(f"Processing file: {file_path}")
+        st.write("Original DataFrame:")
+        st.write(df.head())
+        st.write("Columns:", list(df.columns))
+        st.write("DataFrame shape:", df.shape)
         
-        # Identify date column
-        date_col = next((col for col in date_cols if col in df.columns), df.columns[0])
+        # Identify price column (use Obligation_5Y for obligation data)
+        price_columns = ["Close", "Price", "Cours", "Cours ajusté", "Adjusted Close", "Obligation_5Y"]
+        price_col = next((col for col in price_columns if col in df.columns), df.columns[1])
         
-        # Identify price column
-        price_col = next((col for col in price_cols if col in df.columns), df.columns[1])
-        
-        # Create DataFrame with date and price
+        # Create processed DataFrame
         processed_df = pd.DataFrame({
-            'Date': pd.to_datetime(df[date_col], errors='coerce'),
-            'Price': pd.to_numeric(df[price_col], errors='coerce')
+            "Date": pd.to_datetime(df["Date"], errors="coerce"),
+            "Price": pd.to_numeric(df[price_col], errors="coerce")
         })
         
-        # Drop rows with NaN values
+        # Remove any rows with NaN values
         processed_df.dropna(inplace=True)
         
-        # Rename price column to ticker
-        processed_df.rename(columns={'Price': file_path.split('/')[-1].split('.')[0]}, inplace=True)
+        # Rename price column based on filename
+        processed_df.rename(columns={"Price": file_path.split("/")[-1].split(".")[0]}, inplace=True)
         
-        # Set index and sort
-        processed_df.set_index('Date', inplace=True)
+        # Debugging processed data
+        st.write("Processed DataFrame:")
+        st.write(processed_df.head())
+        st.write("Processed columns:", list(processed_df.columns))
+        st.write("Processed shape:", processed_df.shape)
+        
+        # Set Date as index and sort
+        processed_df.set_index("Date", inplace=True)
         processed_df.sort_index(inplace=True)
         
-        return processed_df[~processed_df.index.duplicated(keep='first')]
+        # Remove duplicate dates
+        return processed_df[~processed_df.index.duplicated(keep="first")]
     
     except Exception as e:
         st.error(f"Error processing {file_path}: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 # File paths
