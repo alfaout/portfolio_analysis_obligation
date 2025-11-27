@@ -180,4 +180,210 @@ def main():
     # Sidebar for company selection
     st.sidebar.header("🔍 Portfolio Configuration")
     
-    # Load and process individual
+    # Load and process individual datasets
+    processed_data = {}
+    for ticker, file_path in file_config.items():
+        try:
+            df = load_and_preprocess_data(file_path)
+            if df is not None and not df.empty:
+                processed_data[ticker] = df
+            else:
+                st.sidebar.warning(f"No valid data for {ticker}")
+        except Exception as e:
+            st.sidebar.error(f"Error processing {ticker}: {e}")
+    
+    # Multiselect for companies
+    available_companies = list(processed_data.keys())
+    
+    # Ensure at least some companies are available
+    if not available_companies:
+        st.error("No valid data found in any of the uploaded files.")
+        return
+    
+    # --- PRIMARY WIDGET CALL ---
+    selected_companies = st.sidebar.multiselect(
+        "Select Companies", 
+        available_companies, 
+        default=[],
+        key="portfolio_analysis_company_selection"
+    )
+    # ---------------------------
+    
+    if len(selected_companies) < 2:
+        st.warning("Please select at least 2 companies for portfolio analysis.")
+        return
+    
+    # Prepare returns data and run analysis
+    try:
+        # Prepare data for selected companies
+        selected_data = pd.concat([processed_data[ticker] for ticker in selected_companies], axis=1)
+        
+        # Additional check to ensure numeric data
+        for col in selected_data.columns:
+            selected_data[col] = pd.to_numeric(selected_data[col], errors="coerce")
+        
+        # Drop any rows that became NaN after conversion and calculate returns
+        selected_data.dropna(inplace=True)
+        returns = selected_data.pct_change().dropna()
+        
+        # Ensure returns are valid
+        if returns.empty:
+            st.error("Not enough valid data to calculate returns. Please check your data.")
+            return
+        
+        # Perform portfolio optimization
+        results = portfolio_optimization(returns)
+        
+        # Get mean returns and volatilities for individual assets
+        mean_ret = returns.mean() * 252
+        vol_ind = returns.std() * np.sqrt(252)
+        
+        # Results Section
+        st.header("📊 Portfolio Analysis Results")
+        
+        # Portfolio Performance Columns
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🏆 Best Sharpe Ratio Portfolio")
+            st.markdown(f"**Return:** {results['best_sharpe_portfolio']['return']:.2%}")
+            st.markdown(f"**Risk:** {results['best_sharpe_portfolio']['risk']:.2%}")
+            st.markdown(f"**Sharpe Ratio:** {results['best_sharpe_portfolio']['sharpe_ratio']:.2f}")
+            
+            st.markdown("**Weights:**")
+            for asset, weight in results['best_sharpe_portfolio']['weights'].items():
+                st.markdown(f"- {asset}: {weight:.2%}")
+
+            # Interpretation
+            st.markdown("""
+            <div class="interpretation">
+            🔍 **Interpretation:**
+            - Higher Sharpe Ratio indicates better risk-adjusted return
+            - This portfolio maximizes return per unit of risk
+            - Ideal for investors seeking optimal performance
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.subheader("🛡️ Minimum Risk Portfolio")
+            st.markdown(f"**Return:** {results['min_risk_portfolio']['return']:.2%}")
+            st.markdown(f"**Risk:** {results['min_risk_portfolio']['risk']:.2%}")
+            st.markdown(f"**Sharpe Ratio:** {results['min_risk_portfolio']['sharpe_ratio']:.2f}")
+            
+            st.markdown("**Weights:**")
+            for asset, weight in results['min_risk_portfolio']['weights'].items():
+                st.markdown(f"- {asset}: {weight:.2%}")
+
+            # Interpretation
+            st.markdown("""
+            <div class="interpretation">
+            🔍 **Interpretation:**
+            - Lowest possible portfolio volatility
+            - Conservative strategy for risk-averse investors
+            - Prioritizes capital preservation
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Visualizations Section
+        st.header("🔍 Asset Performance Analysis")
+        
+        # Asset Price Evolution
+        st.subheader("📈 Asset Price Trends")
+        plt.figure(figsize=(14, 8))
+        for column in selected_data.columns:
+            plt.plot(selected_data.index, selected_data[column], label=column)
+        plt.title("Historical Asset Prices")
+        plt.xlabel("Date")
+        plt.ylabel("Price")
+        plt.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(plt)
+        plt.close()
+        
+        # Normalized Asset Performance
+        st.subheader("📊 Normalized Asset Performance")
+        normalized_data = selected_data / selected_data.iloc[0] * 100
+        plt.figure(figsize=(14, 8))
+        for column in normalized_data.columns:
+            plt.plot(normalized_data.index, normalized_data[column], label=column)
+        plt.title("Normalized Asset Performance (Starting Value = 100)")
+        plt.xlabel("Date")
+        plt.ylabel("Normalized Price (%)")
+        plt.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(plt)
+        plt.close()
+        
+        # Enhanced Efficient Frontier Visualization
+        st.subheader("🎯 Advanced Efficient Frontier Analysis")
+        plt.figure(figsize=(14, 10))
+        
+        # Scatter plot of individual assets
+        plt.scatter(
+            vol_ind, 
+            mean_ret, 
+            marker="o", 
+            s=200, 
+            alpha=0.7, 
+            c=mean_ret/vol_ind,  # Color based on Sharpe ratio
+            cmap="viridis",
+            label="Individual Assets"
+        )
+        
+        # Annotate individual assets
+        for i, ticker in enumerate(returns.columns):
+            plt.annotate(
+                ticker, 
+                (vol_ind[i], mean_ret[i]), 
+                xytext=(10, 10),
+                textcoords="offset points"
+            )
+        
+        # Plot efficient frontier
+        plt.scatter(
+            results["results_array"][:, 1], 
+            results["results_array"][:, 0], 
+            c=results["results_array"][:, 2], 
+            cmap="viridis", 
+            alpha=0.3,
+            label="Possible Portfolios"
+        )
+        
+        # Highlight optimal portfolios
+        plt.scatter(
+            results["best_sharpe_portfolio"]["risk"], 
+            results["best_sharpe_portfolio"]["return"], 
+            color="red", 
+            marker="*", 
+            s=500, 
+            label="Max Sharpe Portfolio"
+        )
+        plt.scatter(
+            results["min_risk_portfolio"]["risk"], 
+            results["min_risk_portfolio"]["return"], 
+            color="green", 
+            marker="*", 
+            s=500, 
+            label="Minimum Risk Portfolio"
+        )
+        
+        plt.title("Advanced Efficient Frontier Analysis")
+        plt.xlabel("Portfolio Risk (Volatility)")
+        plt.ylabel("Expected Portfolio Return")
+        plt.colorbar(label="Sharpe Ratio")
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        st.pyplot(plt)
+        plt.close()
+    
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+# Run the app
+if __name__ == "__main__":
+    main()
